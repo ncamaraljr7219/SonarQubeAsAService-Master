@@ -1,0 +1,146 @@
+name: $(Build.BuildID)
+
+trigger: none
+
+variables:
+- group: 'SonarQube as a Service'
+
+- name: HostingPlan
+  value: 'asp-SonarHosting$(SuffixName)'
+- name: SqlDb
+  value: 'sqldb-sonarhosting$(SuffixName)'
+- name: SqlServer
+  value: 'sqlsrv-sonarhosting$(SuffixName)'
+- name: Website
+  value: 'wa-SonarHosting$(SuffixName)'
+- name: ResourceGroup
+  value: 'Rp-SonarQubeAsAService'
+- name: SkuCapacity
+  value: '1'
+- name: SkuSize
+  value: 'S1'
+
+stages:
+- stage: Build
+  displayName: Build Stage
+
+  jobs:
+  - job: Build_ARM_Phase
+    displayName: 'Build ARM'
+    pool:
+      vmImage: 'ubuntu-latest'
+
+    steps:
+    - task: AzureResourceManagerTemplateDeployment@3
+      displayName: 'Validate ARM Templates'
+      inputs:
+        deploymentScope: 'Resource Group'
+        ConnectedServiceName: '$(AzureConnectionServiceName)'
+        subscriptionName: '$(SubscriptionGuid)'
+        action: 'Create Or Update Resource Group'
+        resourceGroupName: '$(ResourceGroup)'
+        location: 'West Europe'
+        templateLocation: 'Linked artifact'
+        csmFile: 'ARM/sonar.azuredeploy.json'
+        csmParametersFile: 'ARM/sonar.azuredeploy.parameters.json'
+        overrideParameters: '-hostingPlanName "$(HostingPlan)" -webSiteName "$(Website)" -sqlserverName "$(SqlServer)" -databaseName "$(SqlDb)" -skuName "$(SkuSize)" -skuCapacity $(SkuCapacity) -sqlAdministratorLogin "$(SqlAdmin)" -sqlAdministratorLoginPassword "$(SqlAdminPassword)"'
+        deploymentMode: 'Validation'
+
+    - task: CopyFiles@2
+      displayName: 'Copy ARM Files to: AzureRessources Folder'
+      inputs:
+        SourceFolder: ARM
+        TargetFolder: '$(build.artifactstagingdirectory)/AzureRessources'
+
+    - publish: $(build.artifactstagingdirectory)/AzureRessources
+      displayName: 'Publish ARM Files'
+      artifact:  AzureRessources
+    - task: CopyFiles@2
+      displayName: 'Copy Deploy and Run Scripts'
+      inputs:
+        Contents: |
+          Deploy/**/*.ps1
+          Run/**/*.ps1
+          **/sonar.properties
+          **/*.config
+        TargetFolder: '$(build.artifactstagingdirectory)/InstallScripts'
+      
+    - publish: $(build.artifactstagingdirectory)/InstallScripts
+      displayName: 'Publish Deploy and Run Scripts'
+      artifact:  InstallScripts
+
+- stage: Test
+  displayName: Test Deployment
+  dependsOn: Build
+
+  jobs:
+
+  - deployment: Deploy_ARM
+    displayName: 'Deploy Infrastructure'    
+    pool:
+     vmImage: 'vs2017-win2016'
+    environment: Test
+    strategy:
+      runOnce:
+        deploy:
+          steps: 
+          - download: current
+            displayName: Download AzureRessources
+            artifact: AzureRessources
+            patterns: '**/*.json'
+          - download: current
+            displayName: Download InstallScripts
+            artifact: InstallScripts         
+          - task: AzureResourceManagerTemplateDeployment@3
+            displayName: "Deploy Infrastructure"
+            inputs:
+              deploymentScope: 'Resource Group'
+              ConnectedServiceName: '$(AzureConnectionServiceName)'
+              subscriptionName: '$(SubscriptionGuid)'
+              action: 'Create Or Update Resource Group'
+              resourceGroupName: '$(ResourceGroup)'
+              location: 'West Europe'
+              templateLocation: 'Linked artifact'
+              csmFile: '../AzureRessources/sonar.azuredeploy.json'
+              csmParametersFile: '../AzureRessources/sonar.azuredeploy.parameters.json'
+              overrideParameters: '-hostingPlanName "$(HostingPlan)" -webSiteName "$(Website)" -sqlserverName "$(SqlServer)" -databaseName "$(SqlDb)" -skuName "$(SkuSize)" -skuCapacity $(SkuCapacity) -sqlAdministratorLogin "$(SqlAdmin)" -sqlAdministratorLoginPassword "$(SqlAdminPassword)"'
+              deploymentMode: 'Incremental'
+          - task: AzureRmWebAppDeployment@4
+            displayName: "Deploy Installation Scripts"
+            inputs:
+              ConnectionType: 'AzureRM'
+              azureSubscription: '$(AzureConnectionServiceName)'
+              appType: 'webApp'
+              WebAppName: '$(Website)'
+              packageForLinux: '../InstallScripts/Deploy'
+              enableCustomDeployment: true
+              DeploymentType: 'webDeploy'
+          - task: AzurePowerShell@4
+            displayName: "Install SonarQube on WebApp"
+            inputs:
+              azureSubscription: '$(AzureConnectionServiceName)'
+              ScriptType: 'FilePath'
+              ScriptPath: '../InstallScripts/Deploy/RunPowerShellKudu.ps1'
+              ScriptArguments: '-WebsiteName "$(Website)"'
+              azurePowerShellVersion: 'LatestVersion'
+              pwsh: true              
+          - task: AzureRmWebAppDeployment@4
+            displayName: "Deploy Run Scripts"
+            inputs:
+              ConnectionType: 'AzureRM'
+              azureSubscription: '$(AzureConnectionServiceName)'
+              appType: 'webApp'
+              WebAppName: '$(Website)'
+              packageForLinux: '../InstallScripts/Run'
+              enableCustomDeployment: true
+              DeploymentType: 'webDeploy'
+          - task: AzurePowerShell@4
+            displayName: "Configure SonarQube on WebApp"
+            inputs:
+              azureSubscription: '$(AzureConnectionServiceName)'
+              ScriptType: 'FilePath'
+              ScriptPath: '../InstallScripts/Deploy/ConfigureSonar.ps1'
+              ScriptArguments: '-WebAppName "$(Website)" -AdminUser "$(SonarAdmin)" -AadTenantId "$(TenantId)" -AadClientId "$(SonarAppId)" -AadClientSecret "$(SonarAppSecret)"'
+              azurePowerShellVersion: 'LatestVersion'
+              pwsh: true
+          

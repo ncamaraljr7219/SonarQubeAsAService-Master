@@ -1,0 +1,30 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+         "hostingPlanName": {
+            "value": "asp-sonarqube"
+        },
+         "webSiteName": {
+            "value": "wa-sonarqube"
+        },
+         "sqlserverName": {
+            "value": "sqlsrv-sonarqube"
+        },
+        "databaseName": {
+            "value": "sqldb-sonarqube"
+        },
+        "skuName": {
+            "value": "F1"
+        },
+        "skuCapacity": {
+            "value": 1
+        },
+        "sqlAdministratorLogin": {
+            "value": "## TO BE DEFINED ##"
+        },
+        "sqlAdministratorLoginPassword": {
+            "value": "## TO BE DEFINED ##"
+        }   
+    }
+}

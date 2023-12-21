@@ -1,0 +1,312 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "hostingPlanName": {
+            "type": "string",
+            "metadata": {
+                "description": "The admin user of the SQL Server"
+            }
+        },
+        "webSiteName": {
+            "type": "string",
+            "metadata": {
+                "description": "The admin user of the SQL Server"
+            }
+        },
+        "sqlserverName": {
+            "type": "string",
+            "metadata": {
+                "description": "The admin user of the SQL Server"
+            }
+        },
+        "databaseName": {
+            "type": "string",
+            "metadata": {
+                "description": "The admin user of the SQL Server"
+            }
+        },
+        "skuName": {
+            "type": "string",
+            "defaultValue": "F1",
+            "allowedValues": [
+                "F1",
+                "D1",
+                "B1",
+                "B2",
+                "B3",
+                "S1",
+                "S2",
+                "S3",
+                "P1",
+                "P2",
+                "P3",
+                "P4"
+            ],
+            "metadata": {
+                "description": "Describes plan's pricing tier and instance size. Check details at https://azure.microsoft.com/en-us/pricing/details/app-service/"
+            }
+        },
+        "skuCapacity": {
+            "type": "int",
+            "defaultValue": 1,
+            "minValue": 1,
+            "metadata": {
+                "description": "Describes plan's instance count"
+            }
+        },
+        "sqlAdministratorLogin": {
+            "type": "string",
+            "metadata": {
+                "description": "The admin user of the SQL Server"
+            }
+        },
+        "sqlAdministratorLoginPassword": {
+            "type": "securestring",
+            "metadata": {
+                "description": "The password of the admin user of the SQL Server"
+            }
+        },
+        "SonarQube Edition": {
+            "type": "string",
+            "defaultValue": "Community",
+            "allowedValues": [
+                "Community",
+                "Developer",
+                "Enterprise",
+                "Data Center"
+            ]
+        },
+        "SonarQube Version": {
+            "type": "string",
+            "defaultValue": "Latest",
+            "metadata": {
+                "description": "Specific version of SQ to download e.g. 7.9.1 or 8.0. Leave blank or set to 'Latest' for most recent version."
+            }
+        },
+        "location": {
+            "type": "string",
+            "defaultValue": "[resourceGroup().location]",
+            "metadata": {
+                "description": "Location for all resources."
+            }
+        }
+    },
+    "variables": {
+        "uniqueSuffix": "[uniqueString(resourceGroup().id)]",
+        "uniqueHostingPlanName": "[concat(parameters('hostingPlanName'))]",
+        "uniqueWebSiteName": "[concat(parameters('webSiteName'))]",
+        "uniqueSqlserverName": "[concat(parameters('sqlserverName'))]",
+        "uniqueDatabaseName": "[concat(parameters('databaseName'))]"
+    },
+    "resources": [
+        {
+            "name": "[variables('uniqueSqlserverName')]",
+            "type": "Microsoft.Sql/servers",
+            "location": "[parameters('location')]",
+            "tags": {
+                "displayName": "MS Sql Server"
+            },
+            "apiVersion": "2014-04-01",
+            "properties": {
+                "administratorLogin": "[parameters('sqlAdministratorLogin')]",
+                "administratorLoginPassword": "[parameters('sqlAdministratorLoginPassword')]",
+                "version": "12.0"
+            },
+            "resources": [
+                {
+                    "name": "[variables('uniqueDatabaseName')]",
+                    "type": "databases",
+                    "location": "[parameters('location')]",
+                    "tags": {
+                        "displayName": "SonarQube Database"
+                    },
+                    "apiVersion": "2015-01-01",
+                    "dependsOn": [
+                        "[variables('uniqueSqlserverName')]"
+                    ],
+                    "properties": {
+                        "edition": "Standard",
+                        "collation": "SQL_Latin1_General_CP1_CS_AS",
+                        "maxSizeBytes": "1073741824",
+                        "requestedServiceObjectiveName": "S1"
+                    }
+                },
+                {
+                    "type": "firewallrules",
+                    "apiVersion": "2014-04-01",
+                    "dependsOn": [
+                        "[variables('uniqueSqlserverName')]"
+                    ],
+                    "location": "[parameters('location')]",
+                    "name": "Allow All Windows Azure Ips",
+                    "properties": {
+                        "endIpAddress": "0.0.0.0",
+                        "startIpAddress": "0.0.0.0"
+                    }
+                }
+            ]
+        },
+        {
+            "apiVersion": "2016-03-01",
+            "name": "[variables('uniqueHostingPlanName')]",
+            "type": "Microsoft.Web/serverfarms",
+            "location": "[parameters('location')]",
+            "tags": {
+                "displayName": "Hosting Plan"
+            },
+            "sku": {
+                "name": "[parameters('skuName')]",
+                "capacity": "[parameters('skuCapacity')]"
+            },
+            "properties": {
+                "name": "[variables('uniqueHostingPlanName')]"
+            }
+        },
+        {
+            "apiVersion": "2016-03-01",
+            "name": "[variables('uniqueWebSiteName')]",
+            "type": "Microsoft.Web/sites",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[variables('uniqueHostingPlanName')]"
+            ],
+            "tags": {
+                "[concat('hidden-related:', resourceId('Microsoft.Web/serverfarms', variables('uniqueHostingPlanName')))]": "empty",
+                "displayName": "SonarQube Website"
+            },
+            "properties": {
+                "name": "[variables('uniqueWebSiteName')]",
+                "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('uniqueHostingPlanName'))]",
+                "clientAffinityEnabled": false
+            },
+            "resources": [
+                {
+                    "name": "web",
+                    "type": "config",
+                    "apiVersion": "2016-08-01",
+                    "dependsOn": [
+                        "[resourceId('Microsoft.Web/sites', variables('uniqueWebSiteName'))]"
+                    ],
+                    "tags": {
+                        "displayName": "Java TOMCAT 9.0"
+                    },
+                    "properties": {
+                        "alwaysOn": true,
+                        "javaVersion": "11",
+                        "javaContainer": "TOMCAT",
+                        "javaContainerVersion": "9.0"
+                    }
+                },
+                // split the app config settings into seperate objects to seperate on what is being configured
+                  {
+                    "name": "appsettings",
+                    "type": "config",
+                    "apiVersion": "2016-08-01",
+                    "dependsOn": [
+                        "[resourceId('Microsoft.Web/sites', variables('uniqueWebSiteName'))]"
+                    ],
+                    "tags": {
+                        "displayName": "SonarQube Settings"
+                    },
+                    "properties": {
+                        "SonarQubeEdition": "[parameters('SonarQube Edition')]",
+                        "SonarQubeVersion": "[parameters('SonarQube Version')]",
+                        "SqlServerName": "[variables('uniqueSqlserverName')]",
+                        "SqlDatabase": "[variables('uniqueDatabaseName')]",
+                        "SqlDatabaseAdmin": "[parameters('sqlAdministratorLogin')]",
+                        "SqlDatabaseAdminPassword": "[parameters('sqlAdministratorLoginPassword')]"
+                    }
+                }
+            ]
+        },
+        {
+            "apiVersion": "2015-04-01",
+            "name": "[concat(variables('uniqueHostingPlanName'), '-', resourceGroup().name)]",
+            "type": "Microsoft.Insights/autoscalesettings",
+            "location": "[parameters('location')]",
+            "tags": {
+                "[concat('hidden-link:', resourceId('Microsoft.Web/serverfarms', variables('uniqueHostingPlanName')))]": "Resource",
+                "displayName": "AutoScale Settings"
+            },
+            "dependsOn": [
+                "[variables('uniqueHostingPlanName')]"
+            ],
+            "properties": {
+                "profiles": [
+                    {
+                        "name": "Default",
+                        "capacity": {
+                            "minimum": 1,
+                            "maximum": 2,
+                            "default": 1
+                        },
+                        "rules": [
+                            {
+                                "metricTrigger": {
+                                    "metricName": "CpuPercentage",
+                                    "metricResourceUri": "[resourceId('Microsoft.Web/serverfarms', variables('uniqueHostingPlanName'))]",
+                                    "timeGrain": "PT1M",
+                                    "statistic": "Average",
+                                    "timeWindow": "PT10M",
+                                    "timeAggregation": "Average",
+                                    "operator": "GreaterThan",
+                                    "threshold": 80.0
+                                },
+                                "scaleAction": {
+                                    "direction": "Increase",
+                                    "type": "ChangeCount",
+                                    "value": 1,
+                                    "cooldown": "PT10M"
+                                }
+                            },
+                            {
+                                "metricTrigger": {
+                                    "metricName": "CpuPercentage",
+                                    "metricResourceUri": "[resourceId('Microsoft.Web/serverfarms', variables('uniqueHostingPlanName'))]",
+                                    "timeGrain": "PT1M",
+                                    "statistic": "Average",
+                                    "timeWindow": "PT1H",
+                                    "timeAggregation": "Average",
+                                    "operator": "LessThan",
+                                    "threshold": 60.0
+                                },
+                                "scaleAction": {
+                                    "direction": "Decrease",
+                                    "type": "ChangeCount",
+                                    "value": 1,
+                                    "cooldown": "PT1H"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "enabled": false,
+                "name": "[concat(variables('uniqueHostingPlanName'), '-', resourceGroup().name)]",
+                "targetResourceUri": "[resourceId('Microsoft.Web/serverfarms', variables('uniqueHostingPlanName'))]"
+            }
+        },
+        {
+            "apiVersion": "2015-05-01",
+            "name": "[concat('AppInsights', variables('uniqueWebSiteName'))]",
+            "type": "Microsoft.Insights/components",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[variables('uniqueWebSiteName')]"
+            ],
+            "tags": {
+                "[concat('hidden-link:', resourceId('Microsoft.Web/sites', variables('uniqueWebSiteName')))]": "Resource",
+                "displayName": "Application Insights"
+            },
+            "properties": {
+                "ApplicationId": "[variables('uniqueWebSiteName')]"
+            }
+        }
+    ],
+    "outputs": {
+        "siteUri": {
+            "type": "string",
+            "value": "[reference(concat('Microsoft.Web/sites/', variables('uniqueWebSiteName'))).hostnames[0]]"
+        }
+    }
+}
